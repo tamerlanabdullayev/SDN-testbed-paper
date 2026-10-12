@@ -109,12 +109,7 @@ OFLOPS~\cite{Rotsos2012OFLOPS}, and
 WCBench~\cite{wcbench2015} inject artificial Packet-In bursts
 to measure controller throughput but generate no real TCP flows,
 perform no MAC learning, and may not capture the topology-driven
-event dynamics that characterize realistic deployments.
-The IETF's RFC~8456~\cite{rfc8456} defines a methodology for
-SDN controller benchmarking---recommending varying topologies,
-varying network sizes, and repeated statistical trials---yet
-to the best of our knowledge, open-source implementations of
-that methodology remain limited.
+event dynamics that characterize realistic deployments. IETF's RFC~8456~\cite{rfc8456} defines a methodology for benchmarking SDN controller performance, recommending evaluation across varying network topologies and network sizes, along with repeated trials to improve statistical confidence. However, to the best of our knowledge, publicly available open-source testbeds that implement these recommendations in an automated and reusable manner remain limited.
 
 Recent academic studies that do use realistic emulation tools
 such as Mininet and iPerf~\cite{Koulouras2022RealWorld,
