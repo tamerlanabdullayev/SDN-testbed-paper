@@ -65,20 +65,21 @@ Reproducible and rigorous benchmarking of Software-Defined Networking
 (SDN) controllers remains an open challenge. Existing tools either
 rely on synthetic traffic that fails to capture realistic
 controller behavior, or consist of ad-hoc manual experiments that
-lack statistical validation and can be challenging to reuse across studies.
+lack systematic repeated evaluation and variability reporting, and can be challenging to reuse across studies.
 We present an open-source, plug-and-play SDN benchmarking testbed
 that combines Mininet, iperf3, and an instrumented Ryu controller
 application into a fully automated, seed-controlled experimentation
 pipeline. The testbed supports configurable topologies and
 parameters, records per-event controller processing latency
-(Packet-In to FlowMod dispatch), and produces statistically
-validated results through repeated trials with inline aggregation.
-To demonstrate the testbed, we execute 400 controlled experiments
-across two topologies (star and fat-tree), five host counts,
+(Packet-In to FlowMod dispatch), and produces results with
+quantified run-to-run variability through repeated trials with
+inline aggregation.
+To demonstrate the testbed, we execute 800 controlled experiments
+across two controllers (Ryu and OS-Ken), two topologies (star and fat-tree), five host counts,
 and four flow rates with 10 repetitions per configuration.
 The demonstration confirms that the testbed successfully captures
 topology-dependent controller behavior and uncovers performance
-differences that are invisible to existing benchmarking approaches. The testbed and all experiment
+differences not directly exposed by aggregate RTT-based approaches. The testbed and all experiment
 scripts are publicly available at:
 \url{https://github.com/PLACEHOLDER/sdn-testbed}.
 \end{abstract}
@@ -96,15 +97,14 @@ Software-defined networking (SDN)~\cite{McKeown2008OpenFlow}
 decouples the control plane from the data plane, placing forwarding
 intelligence in a software controller. The OpenFlow
 protocol~\cite{McKeown2008OpenFlow} provides a standardized
-southbound interface between controllers and compatible switches, enabling programmatic control of flow tables through Packet-In, FlowMod, and
-PacketOut messages~\cite{OpenFlow13Spec}. Fig.~\ref{fig:sdn_arch} illustrates
-the SDN architecture and key control plane message interactions. As SDN deployments
+southbound interface between controllers and compatible switches, enabling
+programmatic network control. As SDN deployments
 scale~\cite{Kreutz2015SDNSurvey}, rigorous and reproducible benchmarking of controller performance becomes increasingly important for SDN research, controller selection, scalability assessment, and capacity planning.
 
 \textbf{The Reproducibility Gap.}
 Despite the availability of several benchmarking tools, the SDN
 research community lacks an open-source, end-to-end testbed that is
-both statistically rigorous and reusable across studies.
+both systematic and reproducible across studies.
 Synthetic tools such as CBench~\cite{cbench2012},
 OFLOPS~\cite{Rotsos2012OFLOPS}, and
 WCBench~\cite{wcbench2015} inject artificial Packet-In bursts
@@ -121,84 +121,6 @@ instrumentation beyond end-to-end RTT. As a result, their
 findings can be challenging to verify, extend, or reuse without
 reconstructing the experimental setup independently.
 
-\begin{figure}[h]
-	\centering
-	\begin{tikzpicture}[
-		node distance = 0.6cm and 1.0cm,
-		box/.style = {
-			rectangle, draw, rounded corners=3pt,
-			minimum width=2.0cm, minimum height=0.7cm,
-			font=\footnotesize, align=center
-		},
-		arr/.style = {-{Latex[length=2mm]}, thick},
-		dasharr/.style = {-{Latex[length=2mm]}, thick, dashed}
-		]
-		
-		% Controller
-		\node[box, fill=blue!15] (ctrl)
-		{SDN Controller};
-		
-		% Switches
-		\node[box, fill=orange!15,
-		below left=0.9cm and 0.4cm of ctrl] (sw1)
-		{Switch};
-		
-		\node[box, fill=orange!15,
-		below right=0.9cm and 0.4cm of ctrl] (sw2)
-		{Switch};
-		
-		% Hosts
-		\node[box, fill=green!15,
-		below=0.6cm of sw1] (h1) {Host};
-		
-		\node[box, fill=green!15,
-		below=0.6cm of sw2] (h2) {Host};
-		
-		% Switch 1 -> Controller: Packet-In
-		\draw[arr, color=red!70!black]
-		([xshift=-5pt]sw1.north) --
-		node[left, font=\scriptsize, xshift=-3pt, yshift=6pt]
-		{Packet-In}
-		([xshift=5pt]ctrl.south west);
-		
-		% Controller -> Switch 1: FlowMod
-		\draw[dasharr, color=blue!70!black]
-		([xshift=18pt]ctrl.south west) --
-		node[right, font=\scriptsize, xshift=0pt, , yshift=-6pt]
-		{FlowMod}
-		([xshift=9pt]sw1.north);
-		
-		% Switch 2 -> Controller: Packet-In
-		\draw[arr, color=red!70!black]
-		([xshift=5pt]sw2.north) --
-		node[right, font=\scriptsize, xshift=3pt, yshift=6pt]
-		{Packet-In}
-		([xshift=-5pt]ctrl.south east);
-		
-		% Controller -> Switch 2: FlowMod
-		\draw[dasharr, color=blue!70!black]
-		([xshift=-18pt]ctrl.south east) --
-		node[left, font=\scriptsize, xshift=0pt, yshift=-6pt]
-		{FlowMod}
-		([xshift=-9pt]sw2.north);
-		
-		% Data-plane connections
-		\draw[arr] (sw1.south) -- (h1.north);
-		\draw[arr] (sw2.south) -- (h2.north);
-		
-%		% OpenFlow label
-%		\node[font=\scriptsize, color=gray,
-%		below=0.05cm of ctrl] {OpenFlow 1.3};
-		
-	\end{tikzpicture}
-	
-	\caption{SDN architecture showing separate control-plane
-		interactions between the controller and switches via OpenFlow:
-		Packet-In (switch-to-controller) and FlowMod
-		(controller-to-switch).}
-	\label{fig:sdn_arch}
-\end{figure}
-
 \textbf{Our Contribution.}
 We present an open-source, plug-and-play SDN benchmarking
 testbed that addresses these gaps. The testbed makes the following
@@ -213,10 +135,10 @@ contributions:
 
   \item \textbf{Per-event controller instrumentation.} The testbed
   instruments the Ryu controller~\cite{RyuFramework} at the
-  event level, recording wall-clock timestamps from Packet-In
+  event level, recording high-resolution monotonic timestamps from Packet-In
   receipt to FlowMod dispatch for every control-plane event.
   This enables separation of median (p50) and tail (p95) latency,
-  a distinction invisible to RTT-based measurements used in
+  a distinction not separable from RTT-based measurements used in
   prior work.
 
   \item \textbf{Realistic concurrent traffic.} Traffic is generated
@@ -231,10 +153,10 @@ contributions:
   The architecture is designed for straightforward substitution
   of alternative controllers.
 
-  \item \textbf{Statistical validation.} The pipeline supports
+  \item \textbf{Repeated measurements with quantified variability.} The pipeline supports
   configurable repetitions per configuration with distinct seeds,
-  enabling standard deviation computation and confidence evaluation
-  across trials.
+  enabling standard deviation computation and run-to-run variability
+  quantification across trials.
 \end{itemize}
 
 To the best of our knowledge, this is among the first open-source
@@ -243,13 +165,14 @@ methodology recommendations while supporting realistic concurrent
 TCP traffic, per-event controller instrumentation, and automated
 multi-dimensional parameter sweeps.
 
-To validate the testbed, we execute 400 controlled experiments
-across star and fat-tree topologies, five host counts (4--64),
-and four flow rates (25--200 flows/sec) using 10 repetitions
-per configuration. These experiments serve as a demonstration
-of the testbed's measurement capabilities, illustrating its
-ability to surface statistically validated, topology-dependent
-performance differences that prior benchmarking approaches
+To validate the testbed, we execute 800 controlled experiments
+(400 per controller) across Ryu and OS-Ken, star and fat-tree
+topologies, five host counts (4--64), and four flow rates
+(25--200 flows/sec) using 10 repetitions per configuration.
+These experiments serve as a demonstration of the testbed's
+measurement capabilities, illustrating its ability to surface
+topology-dependent performance differences with quantified
+run-to-run variability that prior benchmarking approaches
 may not detect.
 
 The testbed and all scripts are openly available at:
@@ -352,8 +275,8 @@ testbed.
 \midrule
 Real TCP flows          & \xmark & \cmark & \cmark \\
 Automated pipeline      & \xmark & \xmark & \cmark \\
-Statistical reps.       & \xmark & \xmark & \cmark \\
-Param. sweep            & \xmark & \xmark & \cmark \\
+Multi-dim.\ param.\ sweep & \xmark & \xmark & \cmark \\
+Automated rep.\ trials  & \xmark & \xmark & \cmark \\
 Per-event latency       & \xmark & \xmark & \cmark \\
 p50/p95 separation      & \xmark & \xmark & \cmark \\
 CPU/memory monitoring   & \xmark & \xmark & \cmark \\
@@ -433,7 +356,9 @@ all components; the aggregator consolidates per-run outputs.}
 The controller component is a custom Ryu~\cite{RyuFramework}
 application that extends standard MAC-learning L2 switching
 with three instrumentation layers. First, every Packet-In
-event is timestamped on arrival using \texttt{time.perf\_counter()};
+event is timestamped on arrival using \texttt{time.perf\_counter()},
+which provides a high-resolution monotonic clock suitable for
+sub-millisecond interval measurement;
 the processing time to FlowMod dispatch is recorded in
 microsecond resolution to a per-run CSV file (\texttt{flow\_events.csv}).
 This enables direct measurement of controller processing latency,
@@ -473,9 +398,8 @@ generator maintains a precise inter-flow interval of
 $1/\text{FPS}$ seconds using wall-clock timing with sleep
 compensation to absorb scheduling jitter. For each flow,
 source and destination hosts are selected uniformly at
-random without replacement using a deterministic seed
-that is unique per (topology, host count, flow rate,
-repetition) tuple. Flows run concurrently as subprocesses,
+random without replacement using a seed deterministically
+generated for each experiment configuration. Flows run concurrently as subprocesses,
 creating overlapping TCP connections that generate simultaneous
 Packet-In events and stress the controller in a way that
 single-flow benchmarks may not.
@@ -497,8 +421,11 @@ topology, host count, flow rate, run duration, flow duration,
 and seed as command-line arguments. Algorithm~\ref{alg:pipeline}
 shows the full orchestration logic. Seeds are computed
 deterministically as $\text{seed} = 1000 + N \cdot 10 +
-\text{FPS} + \text{rep}$, guaranteeing that any individual
-run can be exactly reproduced from its parameter tuple alone.
+\text{FPS} + \text{rep}$, so that any individual
+run can be reproduced from its parameter tuple.
+(The formula is deterministic per parameter combination;
+topology is encoded implicitly through the output directory
+rather than the seed itself.)
 The matrix scripts iterate over all (topology, $N$, FPS,
 repetition) combinations and invoke \texttt{run\_experiment.sh}
 unattended for the full factorial sweep.
@@ -623,10 +550,9 @@ Error bars show one standard deviation across 10 repetitions.}
 Fig.~\ref{fig:latency} presents the most significant
 demonstration of testbed capability: per-event processing
 latency at p50 and p95 across topologies and flow rates.
-The p50 latency is near zero for both topologies, confirming
-that median-latency measurements---the only metric available
-in prior work---would show no meaningful difference between
-topologies. However, the p95 latency tells a strikingly
+The p50 latency is near zero for both topologies, showing
+that median controller-processing latency alone would reveal
+little difference between the topologies. However, the p95 latency tells a strikingly
 different story: star topology p95 peaks at 10.44\,ms at
 50\,fps before declining, while fat-tree p95 grows gradually
 from 3.04\,ms to 6.80\,ms, consistent with queuing theory
@@ -650,7 +576,7 @@ with controller processing latency.
   }
 \caption{Processing latency and CPU usage vs.\ flow rate.
 p50 is near zero for both topologies; p95 reveals large
-topology-dependent differences invisible to RTT-based
+topology-dependent differences not separable from RTT-based
 measurements. Error bars show one standard deviation.}
 \label{fig:latency}
 \end{figure}
@@ -662,9 +588,9 @@ reveal a critical scalability divergence as host count increases.
 Star topology p95 latency grows 24.4$\times$ from 0.73\,ms
 at $N{=}4$ to 17.81\,ms at $N{=}64$, whereas fat-tree p95
 grows only 10.9$\times$ (0.68 to 7.44\,ms), remaining
-2.4$\times$ lower at maximum scale. The star's p95 plateaus
-near 17\,ms between $N{=}32$ and $N{=}64$, suggesting
-saturation of a burst-driven phenomenon.
+2.4$\times$ lower at maximum scale. The star's p95 remains approximately 17\,ms between
+$N{=}32$ and $N{=}64$, consistent with saturation of
+a burst-driven phenomenon.
 
 \begin{figure}[t]
 \centering
@@ -703,6 +629,43 @@ Star     & 64 & 2393.71 & 187.36 & 17.81 & 8.99  \\
 \end{tabular}
 \end{table}
 
+\subsection{Controller Extensibility: OS-Ken Validation}
+
+To demonstrate the testbed's adapter portability, we substituted
+OS-Ken---the actively maintained community fork of
+Ryu~\cite{RyuFramework}, sharing the same event-dispatch
+architecture and API---and executed the identical 400-run sweep
+under the same parameter matrix. The adapter required six
+\texttt{import} changes (replacing \texttt{ryu.*} with
+\texttt{os\_ken.*} and \texttt{RyuApp} with \texttt{OSKenApp});
+all pipeline components---orchestration scripts, traffic generator,
+system monitor, and aggregator---remained unmodified.
+
+Fig.~\ref{fig:ctrl_comparison} summarizes the aggregate results
+across both controllers and topologies. OS-Ken produces
+functionally equivalent behavior: throughput, Packet-In rates,
+and p95 latency trends are consistent with the Ryu baseline across
+all configurations. The primary resource difference is a
+14.8\% higher mean RSS (58.5\,MB vs.\ 50.9\,MB), attributable
+to OS-Ken's additional bundled dependencies. Mean CPU utilization
+is comparable (6.1\% vs.\ 9.1\%), with run-to-run variance
+dominating over any systematic controller difference.
+These results confirm that the adapter contract is sufficient
+to onboard a closely related controller without altering any
+other pipeline component.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/comparison/fig4_controller_comparison}
+\caption{Aggregate comparison of Ryu (solid) and OS-Ken (hatched)
+across star and fat-tree topologies.
+RS\,=\,Ryu Star; RF\,=\,Ryu Fat-Tree;
+OS\,=\,OS-Ken Star; OF\,=\,OS-Ken Fat-Tree.
+Throughput, latency, and CPU are equivalent; OS-Ken carries a
+14.8\% higher memory footprint.}
+\label{fig:ctrl_comparison}
+\end{figure}
+
 % ── V. Discussion ─────────────────────────────────────────────
 \section{Discussion}
 \label{sec:discussion}
@@ -727,9 +690,9 @@ host pairs temporarily saturating the controller's event queue.
 across aggregation switches, bounding burst intensity to
 ${\leq}6$ host pairs per switch regardless of total
 network size, which explains its 2.4$\times$ lower tail
-latency at scale. \textbf{(F5)} CPU utilization remains
-below 16\% for both topologies, confirming that the
-observed latency anomalies are event-queue driven rather
+latency at scale. \textbf{(F5)} CPU utilization generally remains modest
+across both topologies (mean below 19\%), suggesting that the
+observed latency anomalies are more likely event-queue driven
 than compute-resource limited.
 
 Critically, the MAC burst phenomenon in~(F3) and~(F4) was
@@ -742,13 +705,17 @@ scaling relationship.
 
 \subsection{Limitations of the Demonstration}
 
-The current demonstration uses a single-threaded controller
-(Ryu). Ryu's Python Global Interpreter Lock (GIL) prevents
-true parallel event processing~\cite{Shalimov2013HCprobe},
-making it a tractable but architecturally constrained
-baseline. The testbed is designed for straightforward
-extension to multi-threaded or distributed controllers
-such as ONOS~\cite{Berde2014ONOS} or OpenDaylight.
+The current demonstration evaluates two closely related
+Python event-driven controllers: Ryu and its community
+fork OS-Ken. Both share the same single-threaded
+event-dispatch model, and Ryu's Python Global Interpreter
+Lock (GIL) prevents true parallel event
+processing~\cite{Shalimov2013HCprobe}. The OS-Ken
+experiment validates the adapter contract for closely
+related frameworks; portability to architecturally different
+controllers such as ONOS~\cite{Berde2014ONOS} or
+OpenDaylight (multi-threaded, JVM-based) is left as
+future work.
 
 Emulation fidelity is a secondary limitation: Mininet
 with OVSSwitch in VirtualBox introduces timing noise not
@@ -792,20 +759,23 @@ benchmarking testbed that addresses three core limitations
 of the current landscape: the reliance on synthetic traffic
 in established tools such as CBench and OFLOPS, the
 lack of statistical rigor and automation in academic
-emulation studies, and the absence of any open-source
-implementation of the IETF's RFC~8456 benchmarking
-methodology.
+emulation studies, and the limited availability of
+open-source tooling that operationalizes key RFC~8456
+recommendations in an automated, reusable workflow.
 
 The testbed contributes a seed-controlled automated pipeline,
 per-event controller instrumentation that separates p50
 from p95 processing latency, concurrent realistic TCP
 traffic via iperf3, and a plug-and-play topology and
-parameter system. A 400-run validation study using Ryu
-across star and fat-tree topologies confirms that the
-testbed successfully captures statistically validated,
-topology-dependent controller behavior---including a
-MAC learning burst anomaly that is undetectable by
-prior benchmarking approaches.
+parameter system. An 800-run validation study (400 per controller)
+using Ryu and OS-Ken across star and fat-tree topologies
+confirms that the testbed successfully captures
+topology-dependent controller behavior with quantified
+run-to-run variability---including a MAC learning burst
+anomaly not directly observable using aggregate RTT-only
+measurements---and that the adapter contract enables
+substitution of a closely related controller without
+pipeline modification.
 
 The testbed is publicly available at
 \url{https://github.com/PLACEHOLDER/sdn-testbed}.
