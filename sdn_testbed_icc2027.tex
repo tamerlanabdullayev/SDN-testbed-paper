@@ -36,7 +36,7 @@
 \setlength{\intextsep}{6pt}
 
 % ── Title ─────────────────────────────────────────────────────
-\title{An Open-Source Plug-and-Play Testbed for Reproducible\\
+\title{An Open-Source Plug-and-Play Testbed for
 SDN Controller Performance Benchmarking}
 
 \author{
@@ -57,7 +57,7 @@ SDN Controller Performance Benchmarking}
 
 \begin{document}
 
-\maketitle
+  \maketitle
 
 % ── Abstract ─────────────────────────────────────────────────
 \begin{abstract}
@@ -97,8 +97,9 @@ Software-defined networking (SDN)~\cite{McKeown2008OpenFlow}
 decouples the control plane from the data plane, placing forwarding
 intelligence in a software controller. The OpenFlow
 protocol~\cite{McKeown2008OpenFlow} provides a standardized
-southbound interface between controllers and compatible switches, enabling
-programmatic network control. As SDN deployments
+southbound interface between controllers and compatible switches, enabling programmatic control of flow tables through Packet-In, FlowMod, and
+PacketOut messages~\cite{OpenFlow13Spec}. Fig.~\ref{fig:sdn_arch} illustrates
+the SDN architecture and key control plane message interactions. As SDN deployments
 scale~\cite{Kreutz2015SDNSurvey}, rigorous and reproducible benchmarking of controller performance becomes increasingly important for SDN research, controller selection, scalability assessment, and capacity planning.
 
 \textbf{The Reproducibility Gap.}
@@ -121,25 +122,93 @@ instrumentation beyond end-to-end RTT. As a result, their
 findings can be challenging to verify, extend, or reuse without
 reconstructing the experimental setup independently.
 
+\begin{figure}[h]
+	\centering
+	\begin{tikzpicture}[
+		node distance = 0.6cm and 1.0cm,
+		box/.style = {
+			rectangle, draw, rounded corners=3pt,
+			minimum width=2.0cm, minimum height=0.7cm,
+			font=\footnotesize, align=center
+		},
+		arr/.style = {-{Latex[length=2mm]}, thick},
+		dasharr/.style = {-{Latex[length=2mm]}, thick, dashed}
+		]
+		
+		% Controller
+		\node[box, fill=blue!15] (ctrl)
+		{SDN Controller};
+		
+		% Switches
+		\node[box, fill=orange!15,
+		below left=0.9cm and 0.4cm of ctrl] (sw1)
+		{Switch};
+		
+		\node[box, fill=orange!15,
+		below right=0.9cm and 0.4cm of ctrl] (sw2)
+		{Switch};
+		
+		% Hosts
+		\node[box, fill=green!15,
+		below=0.6cm of sw1] (h1) {Host};
+		
+		\node[box, fill=green!15,
+		below=0.6cm of sw2] (h2) {Host};
+		
+		% Switch 1 -> Controller: Packet-In
+		\draw[arr, color=red!70!black]
+		([xshift=-5pt]sw1.north) --
+		node[left, font=\scriptsize, xshift=-3pt, yshift=6pt]
+		{Packet-In}
+		([xshift=5pt]ctrl.south west);
+		
+		% Controller -> Switch 1: FlowMod
+		\draw[dasharr, color=blue!70!black]
+		([xshift=18pt]ctrl.south west) --
+		node[right, font=\scriptsize, xshift=0pt, , yshift=-6pt]
+		{FlowMod}
+		([xshift=9pt]sw1.north);
+		
+		% Switch 2 -> Controller: Packet-In
+		\draw[arr, color=red!70!black]
+		([xshift=5pt]sw2.north) --
+		node[right, font=\scriptsize, xshift=3pt, yshift=6pt]
+		{Packet-In}
+		([xshift=-5pt]ctrl.south east);
+		
+		% Controller -> Switch 2: FlowMod
+		\draw[dasharr, color=blue!70!black]
+		([xshift=-18pt]ctrl.south east) --
+		node[left, font=\scriptsize, xshift=0pt, yshift=-6pt]
+		{FlowMod}
+		([xshift=-9pt]sw2.north);
+		
+		% Data-plane connections
+		\draw[arr] (sw1.south) -- (h1.north);
+		\draw[arr] (sw2.south) -- (h2.north);
+		
+		%		% OpenFlow label
+		%		\node[font=\scriptsize, color=gray,
+		%		below=0.05cm of ctrl] {OpenFlow 1.3};
+		
+	\end{tikzpicture}
+	
+	\caption{SDN architecture showing separate control-plane
+		interactions between the controller and switches via OpenFlow:
+		Packet-In (switch-to-controller) and FlowMod
+		(controller-to-switch).}
+	\label{fig:sdn_arch}
+\end{figure}
+
 \textbf{Our Contribution.}
 We present an open-source, plug-and-play SDN benchmarking
 testbed that addresses these gaps. The testbed makes the following
 contributions:
 
 \begin{itemize}
-  \item \textbf{Automated, reproducible pipeline.} A seed-controlled,
-  fully automated shell and Python pipeline orchestrates controller
-  startup, network emulation, traffic generation, per-run
-  aggregation, and cleanup. Any experiment can be exactly replicated
-  from its seed without manual intervention.
+  \item \textbf{Automated, reproducible pipeline.} The testbed provides a seed-controlled, fully automated pipeline for orchestrating experiment execution, network emulation, traffic generation, result aggregation, and cleanup. Experiments can be consistently reproduced from their seed without manual intervention.
 
-  \item \textbf{Per-event controller instrumentation.} The testbed
-  instruments the Ryu controller~\cite{RyuFramework} at the
-  event level, recording high-resolution monotonic timestamps from Packet-In
-  receipt to FlowMod dispatch for every control-plane event.
-  This enables separation of median (p50) and tail (p95) latency,
-  a distinction not separable from RTT-based measurements used in
-  prior work.
+\item \textbf{Per-event controller instrumentation.} The testbed instruments SDN controllers at the event level, recording high-resolution monotonic timestamps from Packet-In receipt to FlowMod dispatch for each control-plane event. This enables separate characterization of median (p50) and tail (p95) latency, a distinction not possible with the RTT-based measurements used in prior work.
 
   \item \textbf{Realistic concurrent traffic.} Traffic is generated
   by iperf3~\cite{iperf3} with concurrent, overlapping TCP flows
@@ -147,11 +216,7 @@ contributions:
   simultaneous Packet-In events that stress the controller in
   ways that synthetic single-flow tests may not.
 
-  \item \textbf{Plug-and-play extensibility.} Topologies and
-  traffic parameters are configurable via command-line arguments.
-  New topologies are added by implementing a single Python class.
-  The architecture is designed for straightforward substitution
-  of alternative controllers.
+\item \textbf{Plug-and-play extensibility.} The testbed supports flexible configuration of network topologies and traffic patterns, while enabling researchers to extend its capabilities through custom code for new topologies and alternative controllers.
 
   \item \textbf{Repeated measurements with quantified variability.} The pipeline supports
   configurable repetitions per configuration with distinct seeds,
