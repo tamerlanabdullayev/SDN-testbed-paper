@@ -334,50 +334,11 @@ than by a specific tool, so any of them can be replaced without
 modifying the others.
 
 \begin{figure}[t]
-\centering
-\begin{tikzpicture}[
-  font=\small,
-  box/.style={draw, rounded corners=4pt, minimum width=2.4cm,
-              minimum height=0.65cm, align=center, fill=blue!8},
-  arr/.style={-Stealth, thick},
-  dasharr/.style={-Stealth, thick, dashed},
-  lbl/.style={font=\scriptsize, fill=white, inner sep=1pt}
-]
-  % Left column
-  \node[box] (ctrl)  at (0, 2.6)  {Instrumented\\Controller Adapter};
-  \node[box] (mn)    at (0, 1.2)  {Network\\Emulator};
-  \node[box] (traf)  at (0, 0)    {Traffic\\Generator};
-  % Right column
-  \node[box] (sys)   at (4.0, 2.6) {System\\Monitor};
-  \node[box] (agg)   at (4.0, 1.2) {Inline\\Aggregator};
-  % Top centre
-  \node[box] (orch)  at (2.0, 4.2) {Orchestration\\Layer};
-
-  % Orchestrator to left column (arrive at top edges)
-  \draw[arr] (orch.west)  to[out=200, in=100] (ctrl.north);
-  \draw[arr] (orch.west)  to[out=220, in=120] (mn.north west);
-  \draw[arr] (orch.south) to[out=260, in=80]  (traf.north east);
-  % Orchestrator to right column (arrive at top edges)
-  \draw[arr] (orch.east)  to[out=340, in=80]  (sys.north);
-  \draw[arr] (orch.east)  to[out=320, in=60]  (agg.north east);
-
-  % Controller → Network Emulator (OpenFlow, left side vertical)
-  \draw[dasharr] (ctrl.south) -- node[lbl, right]{OpenFlow} (mn.north);
-
-  % Traffic Generator → Network Emulator (TCP flows, left side vertical)
-  \draw[dasharr] (traf.north) -- node[lbl, left]{TCP flows} (mn.south);
-
-  % System Monitor → Inline Aggregator (metrics, right side vertical)
-  \draw[dasharr] (sys.south)  -- node[lbl, right]{metrics}   (agg.north);
-
-  % Controller → Inline Aggregator (events, diagonal)
-  \draw[dasharr] (ctrl.east)  to[out=0, in=90]
-        node[lbl, below, pos=0.35]{events} (agg.north west);
-
-\end{tikzpicture}
-\caption{Testbed architecture. The orchestration layer coordinates
-all components; the aggregator consolidates per-run outputs.}
-\label{fig:architecture}
+	\centering
+	\includegraphics[width=1.0\linewidth]{figures/architecture}
+	\caption{Testbed architecture. The orchestration layer coordinates
+		all components; the aggregator consolidates per-run outputs.}
+	\label{fig:architecture}
 \end{figure}
 
 \subsection{Controller Adapter Contract}
