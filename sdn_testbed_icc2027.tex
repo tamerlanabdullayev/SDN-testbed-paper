@@ -74,7 +74,7 @@ real network traffic, while studies that emulate real networks are
 usually run by hand, rarely repeat their experiments, and seldom
 report how much results vary between runs, so their findings are
 difficult to reproduce or compare. We present an open source
-testbed that closes this gap by automating the full benchmarking
+testbed that addresses this gap by automating the full benchmarking
 process. It emulates a network of switches and hosts, sends real
 TCP traffic between the hosts, and records how long the controller
 takes to handle each request a switch sends it about a new flow.
@@ -157,7 +157,9 @@ than silently aggregated; and
 (iv)~plug-and-play extensibility, with flexible configuration of
 network topologies and traffic patterns, new topologies added as
 modules, and new controllers integrated through a documented
-adapter contract, without modifying the rest of the pipeline.
+adapter contract (Section~\ref{sec:contract}) without modifying
+the rest of the pipeline, as
+demonstrated with Ryu, OS-Ken, and ONOS.
 
 
 % ── II. Related Work ─────────────────────────────────────────
@@ -350,28 +352,87 @@ $^{\dagger}$\cite{Koulouras2022RealWorld,Cabarkapa2022TreeTopology,Ali2024Compar
 \subsection{Overview}
 
 Fig.~\ref{fig:architecture} illustrates the testbed architecture.
-Four components interact under the control of an automated
-orchestration layer: (1) the \emph{instrumented controller
-adapter}, (2) the \emph{network emulator}, (3) the \emph{traffic
-generator}, and (4) the \emph{system monitor}. Each component is defined by the interface it exposes rather
-than by a specific tool, so any of them can be replaced without
-modifying the others.
+An orchestration layer coordinates five layers: the \emph{traffic
+layer}, which generates the workload; the \emph{emulation layer},
+which emulates the network; the \emph{control layer}, which runs
+the controller under test through an adapter; the
+\emph{monitoring layer}, which samples the controller's resource
+use; and the \emph{analysis layer}, which aggregates the outputs
+of each run. Each layer is defined by the interface it exposes
+rather than by a specific tool, so any of them can be replaced
+without modifying the others. The following subsections describe
+the layers in this order, starting with orchestration.
 
 \begin{figure}[t]
 	\centering
 	\includegraphics[width=1.0\linewidth]{figures/architecture}
 	\caption{Testbed architecture. The orchestration layer coordinates
-		all components; the aggregator consolidates per-run outputs.}
+		all layers; the analysis layer consolidates the outputs of each
+		run.}
 	\label{fig:architecture}
 \end{figure}
 
-\subsection{Controller Adapter Contract}
+\subsection{Orchestration Layer}
 
-A controller is integrated through an \emph{adapter}, which must
-provide three things. First, \emph{lifecycle control}: the
+For each run, the orchestration layer cleans residual emulator
+state, starts the controller through its adapter and waits until
+it is ready, starts the system monitor, runs a short warm-up
+network whose events are excluded from the results, launches the
+emulated network and the traffic schedule, waits for all flows to
+complete, stops all components, aggregates the run, and prunes
+bulky raw outputs once aggregation has succeeded. The seed of each
+run is derived deterministically from its parameters, so any
+individual run can be regenerated from its parameter tuple, and
+full factorial sweeps over all parameter combinations run
+unattended.
+
+\subsection{Traffic Layer: Traffic Model}
+
+Flows are launched at a configured rate (FPS) between pairs of
+distinct hosts chosen uniformly at random from a seeded generator,
+so the traffic schedule of a run depends only on its seed. Each
+flow is a TCP transfer of fixed duration $d$, paced to a fixed
+per-flow rate. Fixing the per-flow rate makes the offered load
+depend on the number of flows in flight ($\text{FPS}\times d$)
+rather than on the host count, and keeps traffic generation from
+contending with the controller for CPU on a single emulation
+host. Every destination provides enough receivers that
+concurrent flows are not rejected. For each run, the traffic
+generator records the achieved launch rate, and every flow's
+outcome is classified, so that runs whose workload was not
+delivered as configured can be detected rather than silently
+aggregated.
+
+\subsection{Emulation Layer: Topology Module}
+
+Topologies are modules that expose a single builder
+parameterized by the host count $N$ and are registered by name,
+so a new topology can be added without modifying the rest of the
+pipeline. Static address resolution is configured on all hosts,
+so no ARP traffic reaches the controller. The testbed currently
+includes two loop-free topologies used in this paper: a star
+($N$ hosts on a single switch) and a two-tier tree, in which one
+core switch connects $\lceil N/4 \rceil$ edge switches with up to
+four hosts each. An experimental full-mesh topology is also
+included but requires a loop-prevention mechanism (e.g., STP) in
+the control application and is not evaluated here.
+
+\subsection{Control Layer: Controller Adapter Contract}
+\label{sec:contract}
+
+The testbed never interacts with a controller directly. Instead,
+each controller is wrapped in an \emph{adapter}: a small module,
+specific to that controller, that translates the testbed's generic
+requests (start, stop, report results) into the commands and files
+of that controller. The \emph{adapter contract} is the fixed set
+of obligations every adapter must meet, so that the orchestration,
+monitoring, and aggregation work unchanged for any controller that
+satisfies it. The contract has three parts. First,
+\emph{lifecycle control}: the
 adapter starts the controller on a given OpenFlow port with a
-given per-run output directory, reports its process identifier
-for monitoring, and stops it cleanly. Second, a \emph{reference
+given per-run output directory, signals when the controller is
+ready to accept switch connections, reports the identifier of the
+controller process for monitoring, and stops it cleanly. Second, a \emph{reference
 control application} that defines the workload: MAC-learning L2
 switching in which flow entries match on the input port and the
 source and destination MAC addresses. Flow entries are installed
@@ -397,9 +458,9 @@ The handler processing time isolates controller-side processing
 from network and switch delays, but excludes the time a message
 spends in transit and waiting in the controller's event queue
 before dispatch; queue residence time is a complementary metric
-that can be obtained without controller changes by timestamping
-OpenFlow messages on the control channel, which we leave to
-future work. Unlike the black-box measurement model of
+that can be obtained without controller changes from a capture of
+the control channel, which the orchestrator records; analysing it
+is left to future work. Unlike the black-box measurement model of
 RFC~8456~\cite{rfc8456}, which observes timing at the test
 emulator interfaces, these timestamps are taken inside the
 controller application. Reporting both the median (p50) and
@@ -409,67 +470,31 @@ under bursty load, as queueing analyses of SDN
 controllers~\cite{Xiong2016QueueingSDN} suggest.
 
 Integrating a new controller therefore amounts to implementing
-the lifecycle operations and emitting these two records; the
+the lifecycle operations and the reference application and emitting
+these two records; the
 emulator, traffic generator, monitor, orchestration, and
 aggregation remain unchanged.
 
-\subsection{Topology Module}
+\subsection{Monitoring Layer: System Monitor}
 
-Topologies are modules that expose a single builder
-parameterized by the host count $N$ and are registered by name,
-so a new topology can be added without modifying the rest of the
-pipeline. Static address resolution is configured on all hosts,
-so no ARP traffic reaches the controller. The testbed currently
-includes two loop-free topologies used in this paper: a star
-($N$ hosts on a single switch) and a two-tier tree, in which one
-core switch connects $\lceil N/4 \rceil$ edge switches with up to
-four hosts each. An experimental full-mesh topology is also
-included but requires a loop-prevention mechanism (e.g., STP) in
-the control application and is not evaluated here.
+A separate process samples the controller's CPU utilization,
+resident memory (RSS), and thread count once per second. Running
+the monitor as a separate process keeps monitoring from
+interfering with the controller.
 
-\subsection{Traffic Model}
-
-Flows are launched at a configured rate (FPS) between pairs of
-distinct hosts chosen uniformly at random from a seeded generator,
-so the traffic schedule of a run depends only on its seed. Each
-flow is a TCP transfer of fixed duration $d$, paced to a fixed
-per-flow rate. Fixing the per-flow rate makes the offered load
-depend on the number of flows in flight ($\text{FPS}\times d$)
-rather than on the host count, and keeps traffic generation from
-contending with the controller for CPU on a single emulation
-host. Every destination provides enough receivers that
-concurrent flows are not rejected. For each run, the traffic
-generator records the achieved launch rate, and every flow's
-outcome is classified, so that runs whose workload was not
-delivered as configured can be detected rather than silently
-aggregated.
-
-\subsection{System Monitor and Orchestration}
-
-For each run, the orchestration layer cleans residual emulator
-state, starts the controller through its adapter, starts the
-system monitor---a separate process that samples the
-controller's CPU utilization, resident memory (RSS), and thread
-count once per second---launches the emulated network and the traffic
-schedule, waits for all flows to complete, stops all components,
-aggregates the run, and prunes bulky raw outputs once
-aggregation has succeeded. The seed of each run is derived
-deterministically from its parameters, so any individual run can
-be regenerated from its parameter tuple, and full factorial
-sweeps over all parameter combinations run unattended.
-
-\subsection{Metrics and Aggregation}
+\subsection{Analysis Layer: Metrics and Aggregation}
 
 After each run, the inline aggregator computes and appends to the
 results table: the \emph{flow success rate} (fraction of planned
 flows completed without error) and \emph{achieved flow rate}
 (flows launched divided by actual launch duration), which validate
-that the run delivered its configured workload; \emph{delivered
+that the run delivered its configured workload; \emph{measured
 throughput} (bytes sent by successful flows divided by run
 duration); the mean \emph{Packet-In rate}; the p50 and p95
 \emph{handler processing time} over all Packet-In events,
 including flooding events; and mean controller \emph{CPU} and
-\emph{memory}. Per-second means include controller startup.
+\emph{memory} over the traffic window, from the first flow launch
+until the last flow completes.
 
 % ── IV. Implementation ───────────────────────────────────────
 \section{Implementation}
@@ -479,68 +504,55 @@ including flooding events; and mean controller \emph{CPU} and
 
 The network emulator is Mininet~\cite{Lantz2010Mininet} with
 Open vSwitch~\cite{ovs} and TCLink links; static ARP entries are
-pre-populated with Mininet's \texttt{autoStaticArp} option.
-Topologies are Python classes inheriting from Mininet's
-\texttt{Topo} base class: adding one requires implementing a
-single \texttt{build(self, n)} method and a one-line entry in the
-topology factory.
+pre-populated with Mininet's \texttt{autoStaticArp} option. A
+topology is a Mininet \texttt{Topo} subclass with a single
+\texttt{build(self, n)} method, registered with one line.
 
 \subsection{Traffic Generation}
 
 Traffic is generated with iperf3~\cite{iperf3}. Because an
 iperf3 server serves one test at a time, each host runs a pool of
-servers on a dedicated block of ports. The pool size is derived
-from the expected number of concurrent flows per destination,
-$\lambda = \text{FPS}\cdot(d+g)/N$ with a guard interval
-$g{=}1$\,s, as $\lceil 1.5\lambda + 3\sqrt{\lambda}\,\rceil$
-(bounded to 4--320), and each flow is assigned the
-least-recently-used port on its destination; port assignment is
-deterministic, so it does not alter the seeded schedule. Traffic
-begins only after every server port is verified to be listening.
-Launches follow a wall-clock schedule with sleep compensation,
-and finished clients are reaped. Pacing uses kernel socket pacing
-(\texttt{--fq-rate}), avoiding the CPU cost of application-level
-rate limiting; each client's JSON output is classified as
+$\lceil 1.5\lambda + 3\sqrt{\lambda}\,\rceil$ servers (bounded
+to 4--320), where $\lambda = \text{FPS}\cdot(d+1\,\text{s})/N$ is
+the expected number of concurrent flows per destination, and each
+flow uses the least recently used port on its destination. Traffic
+starts once every server port is listening, launches follow a
+wall-clock schedule, pacing uses kernel socket pacing
+(\texttt{--fq-rate}), and each client's output is classified as
 successful, rejected, or failed.
 
 \subsection{Monitoring, Orchestration, and Aggregation}
 
-The system monitor uses \texttt{psutil}~\cite{psutil}; CPU
-percentage is primed with an initial non-blocking call before
-sampling begins, and the monitor runs as a separate OS process to
-avoid GIL contention with the controller. Orchestration is
-script-based: the shell script \texttt{run\_experiment.sh}
-accepts the topology, host count, flow rate, run duration, flow
-duration, and seed as command-line arguments and implements the
-per-run sequence of Section~\ref{sec:design}. Seeds are computed as
-$\text{seed} = B_T + 10N + \text{FPS} + \text{rep}$, where $B_T$
-is a per-topology offset (1000 for star, 2000 for the two-tier
-tree). Matrix scripts iterate over all (topology, $N$, FPS,
-repetition) combinations, and the aggregator
-(\texttt{aggregate\_results.py}) appends one row per run to a
-summary CSV.
+The system monitor uses \texttt{psutil}~\cite{psutil}.
+Orchestration is script-based: \texttt{run\_experiment.py}
+takes the controller and run parameters as command-line arguments,
+pins the controller to a dedicated CPU core and the emulator and
+traffic generator to the remaining cores, detects readiness through
+the adapter (for example, by polling the controller's OpenFlow
+port), and records the control
+channel with \texttt{tcpdump}. Seeds are
+$\text{seed} = B_T + 10N + \text{FPS} + \text{rep}$, with
+$B_T = 1000$ for star and 2000 for the tree. A resumable sweep
+script runs all combinations, and the aggregator appends one row
+per run to a summary CSV.
 
 
 
 % ── V. Testbed Validation ────────────────────────────────────
-\section{Testbed Validation: Case Studies with Ryu and OS-Ken}
+\section{Testbed Validation: Case Studies with Ryu, OS-Ken, and ONOS}
 \label{sec:demo}
 
 \subsection{Controller Adapters}
 
 The reference adapter is a Ryu~\cite{RyuFramework} application
-(v4.34, OpenFlow~1.3) implementing the control logic and
+(v4.34, OpenFlow~1.3, CPython~3.10) implementing the control logic and
 instrumentation of Section~\ref{sec:design}. Each Packet-In
 handler invocation is timestamped on entry with
 \texttt{time.perf\_counter()}, a high-resolution monotonic clock,
-and the handler processing time is written in milliseconds to
-\texttt{flow\_events.csv}. Per-second Packet-In and
-FlowMod counts are written to \texttt{controller\_metrics.csv} by
-a background greenthread (\texttt{hub.spawn}), so the logger does
-not block the main event loop. The per-run output directory is
-passed through the \texttt{OUTDIR} environment variable, so the
-orchestrator can isolate each run's output without modifying
-controller code. A second adapter for OS-Ken is described in
+and written in milliseconds to \texttt{flow\_events.csv};
+per-second counts are written by a background greenthread, so
+logging does not block the event loop, and the output directory is
+passed through an environment variable. Adapters for OS-Ken and ONOS are described in
 Section~\ref{sec:osken}.
 
 \subsection{Experimental Configuration}
@@ -549,57 +561,54 @@ We run a full factorial experiment with the Ryu adapter over two
 topologies (star, two-tier tree), $N\in\{4,8,16,32,64\}$ hosts,
 and flow rates of 25, 50, 100, and 200 flows/s, with 2\,s flows
 paced at 2\,Mbit/s over 20\,s runs and 10 repetitions with
-distinct seeds per configuration (400 runs per controller).
-All experiments run on a single VirtualBox VM (Ubuntu~24.04,
-16~vCPUs, 16~GB RAM), executed unattended by the matrix scripts.
-Each run, including emulator setup and teardown, takes
-30--45\,s of wall-clock time, so a 400-run sweep completes without
-intervention in about 4--5\,h.
+distinct seeds per configuration (400 runs), and repeat the
+identical sweep with the OS-Ken and ONOS adapters (1{,}200 runs in
+total). All experiments run on a single VirtualBox VM
+(Ubuntu~24.04, 16~vCPUs, 16~GB RAM); the controller is pinned to a
+dedicated vCPU, and the emulated network and traffic generator to
+three others. A run takes about 40\,s with Ryu and OS-Ken and
+70\,s with ONOS; the full sweep completed unattended in 16.3\,h,
+and a code hash recorded by every run confirms that all runs used
+identical code.
 
 \subsection{Workload Validation}
 \label{sec:workload}
 
 Before controller metrics are analyzed, the testbed verifies that
-every run delivered its configured workload. Across all 800 runs, the
-flow success rate was at least 99.8\% and the achieved flow rate
-was within 1.8\% of the configured rate. Measured throughput
-scales linearly with flow rate (131\,Mbps at 25\,fps to
-1.04\,Gbps at 200\,fps) and differs by less than 0.3\% between
-topologies, confirming that both topologies receive the same
-offered load. Because the measure uses iperf3's sender-side byte
-count, which includes data still queued in the socket buffer when
-a flow ends, its absolute value is an upper bound, about 30\%
-above the nominal paced load.
-These checks matter: in preliminary runs with
-unpaced traffic, emulation-host saturation inflated the star's
-p95 handler processing time at $N{=}64$ to ${\sim}18$\,ms, about
-27$\times$ the 0.67\,ms measured with paced traffic---a distortion
-that controller-side metrics alone cannot distinguish from genuine
-controller behavior. CPU averages discard each run's first
-monitor sample, which covers only a sub-millisecond window after
-the priming call and occasionally read several thousand percent.
+every run delivered its configured workload. Across all 1{,}200
+runs, the flow success rate was at least 99.8\% and the achieved
+flow rate was within 4\% of the configured rate (within 0.2\% for
+Ryu and OS-Ken). Measured throughput scales linearly with flow rate
+and differs by at most 1.2\% between topologies, confirming equal
+offered load; as it uses iperf3's sender-side byte count, which
+includes data still queued when a flow ends, it is an upper bound,
+27--30\% above the nominal load. These checks matter: in preliminary runs with unpaced traffic and
+an unpinned controller, emulation-host saturation inflated the
+star's p95 handler processing time at $N{=}64$ to ${\sim}18$\,ms,
+more than 40$\times$ the 0.40\,ms measured in the final
+configuration---a distortion that controller-side metrics alone
+cannot distinguish from genuine controller behavior. Even with
+paced traffic, an unpinned controller showed a 30--50\% higher p95
+than a pinned one, because it competed with emulation processes
+for CPU.
 
 \subsection{Per-Event Processing Latency}
 
 Fig.~\ref{fig:latency} shows per-event handler processing time at
 p50 and p95 across flow rates at $N{=}64$. The p50 stays nearly
-constant at 0.14--0.20\,ms for both topologies, so a median-based
+constant at 0.13--0.16\,ms for both topologies, so a median-based
 measurement would suggest that load has little effect. The p95,
-however, rises from 0.37 to 1.38\,ms for the star and from 0.34
-to 1.71\,ms for the tree between 25 and 200\,fps, with the
-steepest increase above 100\,fps. To our knowledge, existing
-open-source benchmarking tools do not report this per-event
-distribution, and the Mininet-based studies of
-Section~\ref{sec:related} rely on end-to-end RTT, which conflates
-network latency with controller processing.
+however, rises from 0.28 to 0.66\,ms for the star and from 0.26
+to 1.53\,ms for the tree between 25 and 200\,fps, with the
+steepest increase above 50\,fps for the tree and above 100\,fps
+for the star.
 
 The sweep also exposes how workload parameters interact. Because
-flow entries are installed without timeouts and ARP is
-pre-populated, Packet-Ins occur only on first contact between each
-directed host pair at each switch. At small $N$, all pairs are
+Packet-Ins occur only on first contact between each directed host
+pair at each switch, at small $N$ all pairs are
 discovered early in a run and flow rate has little effect (star,
-$N{=}4$: p95 of 0.39\,ms at both 25 and 200\,fps); at $N{=}64$,
-many of the 4{,}032 directed pairs remain unseen even at
+$N{=}4$: p95 of 0.41 and 0.43\,ms at 25 and 200\,fps); at
+$N{=}64$, many of the 4{,}032 directed pairs remain unseen even at
 200\,fps, so higher flow rates keep raising controller load. The
 $N{=}4$ case also shows that traffic volume alone does not inflate
 the tail, since as many flows are in flight as at $N{=}64$.
@@ -615,43 +624,42 @@ intervals of the mean over 10 repetitions.}
 
 \subsection{Scalability with Host Count}
 
-Fig.~\ref{fig:scalability} and Table~\ref{tab:hosts} show that p95 grows by 1.7$\times$
-from $N{=}4$ to $N{=}64$ for both topologies (star: 0.39 to
-0.67\,ms; tree: 0.47 to 0.80\,ms), with most of the growth above
-$N{=}16$; the tree's higher p95 at $N{=}4$ reflects the few
-Packet-In events per run at this scale. Over the same range,
-delivered throughput stays at about 490\,Mbps (averaged over flow
-rates), while mean controller CPU rises from about 1\% to 10\%
-(star) and 16\% (tree), and never exceeds 22\% in any configuration,
-suggesting that the tail is not compute-bound.
+Fig.~\ref{fig:scalability} and Table~\ref{tab:hosts} show that
+p95 stays between 0.29 and 0.40\,ms for both topologies up to
+$N{=}32$. At $N{=}64$, the tree's p95 roughly doubles to
+0.74\,ms, while the star's remains at 0.40\,ms; the slightly
+higher p95 at $N{=}4$ reflects the few Packet-In events per run at
+this scale. Mean controller CPU during traffic rises from below 1\% to 13\%
+(star) and 20\% (tree) and never exceeds 29\% in any
+configuration, suggesting that the tail is not compute-bound.
 
-The tree generates 1.7--2.1$\times$ more Packet-Ins than the star
+The tree generates 1.7--1.8$\times$ more Packet-Ins than the star
 at the same flow rate, because a flow between hosts on different
 edge switches traverses three switches, each raising its own
 Packet-In. Although the tree spreads these over
-$\lceil N/4 \rceil + 1$ switches, its p95 is 1.2$\times$ higher at
-$N{=}64$ (confidence intervals overlap), so per-switch
-concentration does not explain the tail. Nor does the mean
-Packet-In rate alone: for the star at $N{=}64$, p95 nearly
-triples from 100 to 200\,fps while the mean Packet-In rate does
-not increase (283 vs.\ 269\,pkt/s), pointing to the burstiness of
-Packet-In arrivals, which the testbed's per-second counters can
-quantify.
+$\lceil N/4 \rceil + 1$ switches, its p95 at $N{=}64$ is
+1.9$\times$ the star's, so per-switch concentration does not
+appear to be the primary explanation of the tail. The mean
+Packet-In rate alone does not explain it either: for the
+star at $N{=}64$, p95 rises by 83\% from 100 to
+200\,fps while the mean Packet-In rate rises by only 7\% (281
+vs.\ 302\,pkt/s), pointing to the burstiness of Packet-In
+arrivals, which the testbed's per-second counters can quantify.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig_scalability_vs_hosts}
 \caption{Ryu, (a) p95 handler processing time and (b) Packet-In rate
 vs.\ host count, averaged over flow rates. Error bars show 95\%
-confidence intervals of the mean. Tail latency grows with host
-count for both topologies, tracking Packet-In load.}
+confidence intervals of the mean. The tree's tail rises at
+$N{=}64$, while the star's stays nearly flat.}
 \label{fig:scalability}
 \end{figure}
 
 \begin{table}[t]
 \centering
 \caption{Ryu Metrics by Topology and Host Count (means over flow
-rates and repetitions)}
+rates and repetitions; CPU over the traffic window)}
 \label{tab:hosts}
 \setlength{\tabcolsep}{4pt}
 \renewcommand{\arraystretch}{1.05}
@@ -663,85 +671,61 @@ rates and repetitions)}
 \makecell{\textbf{p95 Lat}\\\textbf{(ms)}} &
 \makecell{\textbf{CPU}\\\textbf{(\%)}} \\
 \midrule
-Star & 4  & 491 & 3   & 0.39 & 0.9 \\
-Star & 8  & 491 & 12  & 0.38 & 1.3 \\
-Star & 16 & 491 & 45  & 0.40 & 2.6 \\
-Star & 32 & 491 & 127 & 0.49 & 6.2 \\
-Star & 64 & 490 & 221 & 0.67 & 10.4 \\
+Star & 4  & 486 & 4   & 0.40 & 0.2 \\
+Star & 8  & 487 & 13  & 0.31 & 0.6 \\
+Star & 16 & 486 & 45  & 0.32 & 1.9 \\
+Star & 32 & 482 & 121 & 0.33 & 6.1 \\
+Star & 64 & 475 & 234 & 0.40 & 13.1 \\
 \midrule
-Tree & 4  & 489 & 6   & 0.47 & 1.0 \\
-Tree & 8  & 491 & 22  & 0.35 & 1.6 \\
-Tree & 16 & 491 & 78  & 0.40 & 3.6 \\
-Tree & 32 & 491 & 222 & 0.54 & 8.9 \\
-Tree & 64 & 488 & 416 & 0.80 & 15.7 \\
+Tree & 4  & 486 & 8   & 0.37 & 0.3 \\
+Tree & 8  & 486 & 24  & 0.31 & 0.8 \\
+Tree & 16 & 484 & 82  & 0.29 & 2.6 \\
+Tree & 32 & 477 & 217 & 0.36 & 8.4 \\
+Tree & 64 & 473 & 404 & 0.74 & 20.4 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Extensibility and Reproducibility}
+\subsection{Extensibility: OS-Ken and ONOS}
 \label{sec:osken}
 
 Extending the testbed requires little code: the star topology
 module is 8 lines of Python and the two-tier tree under 20, and
 the Ryu adapter, including its instrumentation, is about 120
-lines. To test adapter portability, we substituted
-OS-Ken---the actively maintained community fork of
-Ryu~\cite{RyuFramework}, sharing the same event-dispatch
-architecture and API---and executed the identical 400-run sweep.
-The adapter differs only in seven \texttt{import} lines
-(\texttt{ryu.*} to \texttt{os\_ken.*}) and its base class
-(\texttt{RyuApp} to \texttt{OSKenApp}); apart from the controller
-launch command, process names, and output paths in the run
-script, all pipeline
-components---traffic generator, system monitor, and
-aggregator---remained unmodified.
+lines. To validate the testbed across controller architectures,
+rather than to compare controller performance, we integrated two
+further controllers and ran the identical 400-run sweep with each. OS-Ken, the
+actively maintained community fork of Ryu~\cite{RyuFramework},
+required only seven \texttt{import} lines and a different base
+class in the Ryu application. ONOS~\cite{Berde2014ONOS} (v2.7.0)
+is architecturally different: a multithreaded Java controller that
+runs inside an OSGi container. Its adapter consists of a 199-line
+ONOS application that reimplements the reference control
+application and writes the same two records in the same schemas,
+253 lines of Python and shell for lifecycle control and
+installation, and a 50-line build file. Apart from registering the
+adapter by name (8 lines), no shared component contains code
+specific to ONOS.
 
-Table~\ref{tab:osken} summarizes the results for both controllers.
-Packet-In rates agree within 3\% on average, confirming that both
-adapters receive the same workload, and OS-Ken reproduces the
-load-dependent tail: at $N{=}64$, its p95 rises from 0.36 to
-0.97\,ms (star) and from 0.30 to 1.83\,ms (tree) between 25 and
-200\,fps. OS-Ken's handler processing time is consistently lower,
-by 12--24\% at p50 in every configuration and by 11\% at p95 on
-average (significant in 27 of 40 configurations; Welch's $t$-test,
-$p<0.05$). Both applications share the same control logic, but
-OS-Ken (v2.8.1) ran under Python~3.12 and Ryu under Python~3.10,
-so the difference likely reflects the interpreter and dependency
-versions rather than the framework; we did not isolate it. Mean CPU and RSS differ by
-less than run-to-run variability and about 1\%, respectively.
-The adapter contract is thus sufficient to onboard a closely
-related controller without altering any other pipeline component,
-and the testbed resolves median differences of a few tens of
-microseconds between controllers.
+Integrating ONOS exposed two requirements that the original
+contract left implicit, and the pipeline now applies both to every
+controller: the adapter must signal readiness, because ONOS needs
+20--28\,s to accept switch connections compared with about 0.2\,s
+for Ryu, and the monitored process must be the controller itself
+rather than its launcher script; a warm-up round also lets
+controllers that compile code at run time reach steady state. Two
+ONOS runs failed during startup, were caught by the readiness
+check, and were rerun, and the monitor recorded ONOS's very
+different footprint (about 1.5\,GB of memory versus 60\,MB for
+Ryu) without modification. Because ONOS installs flow
+rules through its own flow subsystem, its handler time covers
+different work than Ryu's, so we do not compare handler times
+across frameworks; the recorded control channel captures enable
+such comparisons and are left to future work.
 
-Repeated runs are consistent. Across the 40 Ryu configurations,
-the 95\% confidence interval of the mean is within 10\% of the
-mean for p50 in all configurations, for the Packet-In rate in 39,
-and for p95 in 30; the widest intervals occur at $N{=}4$, where
-few Packet-Ins are sampled per run, and for the star at
-$N{=}64$ and 200\,fps.
-
-\begin{table}[t]
-\centering
-\caption{Ryu vs.\ OS-Ken (means over all runs; p95 with 95\%
-confidence interval)}
-\label{tab:osken}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{llrrrr}
-\toprule
-\textbf{Ctrl.} & \textbf{Topo.} &
-\makecell{\textbf{p95 Lat}\\\textbf{(ms)}} &
-\makecell{\textbf{Pkt-In}\\\textbf{(pkt/s)}} &
-\makecell{\textbf{CPU}\\\textbf{(\%)}} &
-\makecell{\textbf{RSS}\\\textbf{(MB)}} \\
-\midrule
-Ryu    & Star & 0.46\,$\pm$\,0.04 & 81.6  & 4.3 & 58.9 \\
-Ryu    & Tree & 0.51\,$\pm$\,0.05 & 148.8 & 6.2 & 59.1 \\
-OS-Ken & Star & 0.41\,$\pm$\,0.02 & 83.5  & 4.0 & 58.2 \\
-OS-Ken & Tree & 0.45\,$\pm$\,0.05 & 149.9 & 5.7 & 58.3 \\
-\bottomrule
-\end{tabular}
-\end{table}
+Repeated runs are consistent: across the 40 Ryu configurations,
+the 95\% confidence interval is within 10\% of the mean for p50 in
+all 40 and for p95 in 28, with the widest intervals at small $N$.
 
 % ── VI. Discussion ─────────────────────────────────────────────
 \section{Discussion}
@@ -751,40 +735,31 @@ OS-Ken & Tree & 0.45\,$\pm$\,0.05 & 149.9 & 5.7 & 58.3 \\
 
 Three lessons from the validation apply beyond the evaluated
 controllers. First, controller metrics are trustworthy only if the
-delivered workload is verified: host saturation produced a
-27$\times$ tail inflation that resembled controller behavior
-(Section~\ref{sec:workload}). Second, the median hides
-load-dependent behavior that the per-event p95 exposes and that
-RTT-based measurement cannot separate from network delay. Third,
-controller-side counters allow explanations to be tested rather
-than assumed: the data rule out per-switch concentration as the
-cause of the tail and point to bursty Packet-In arrival. Because
-handler processing time is wall-clock time on a shared host,
-preemption by co-located emulation processes cannot be fully
-ruled out; pinning the controller to dedicated cores to separate
-these effects is left to future work.
-
+delivered workload is verified and the controller is isolated from
+the emulation: host saturation produced a tail inflation of more
+than 40$\times$ that resembled controller behavior, and even with
+paced traffic, sharing CPUs with the emulation raised p95 by
+30--50\% (Section~\ref{sec:workload}). Second, the median hides
+load-dependent behavior that the per-event p95 exposes. Third,
+controller-side counters let explanations be tested: the data do
+not support per-switch concentration as the primary explanation of
+the tail and point to bursty Packet-In arrival.
 
 \subsection{Limitations of the Demonstration}
 
-The demonstration evaluates two closely related Python
-controllers with the same single-threaded event-dispatch model,
-so it validates the adapter contract only for closely related
-frameworks; adapters for architecturally different controllers
-such as ONOS~\cite{Berde2014ONOS} or OpenDaylight are future
-work.
+All three controllers run the same simple L2 reference
+application, so the demonstration exercises the adapter contract
+and the measurement pipeline rather than richer control logic, and
+handler times are comparable only within a framework
+(Section~\ref{sec:osken}).
 
 Emulation in a VM adds timing noise, so absolute values reflect
-the emulated environment; relative comparisons are more robust.
-Flow entries are installed without timeouts, so Packet-In load is
-bounded by unique directed host pairs rather than the offered flow
-rate; flow-expiry workloads are future work. Flows are paced to
-a fixed 2\,Mbit/s so that traffic generation does not contend
-with the controller for CPU on the single emulation host
-(Section~\ref{sec:workload}),
-which limits the offered data-plane load. Finally, the evaluated tree lacks the redundant paths of a
-$k$-ary fat-tree; multipath topologies require loop prevention
-in the control application.
+the emulated environment. Without flow timeouts, Packet-In load is
+bounded by unique host pairs; flow-expiry workloads are future
+work. Paced 2\,Mbit/s flows limit the offered data-plane load, and
+the evaluated tree lacks the redundant paths of a $k$-ary
+fat-tree, which require loop prevention in the control
+application.
 
 
 % ── VII. Conclusion ─────────────────────────────────────────
@@ -792,28 +767,20 @@ in the control application.
 \label{sec:conclusion}
 
 We presented an open-source, plug-and-play SDN controller
-benchmarking testbed that addresses three core limitations
-of the current landscape: the reliance on synthetic stimulus
-in established tools such as CBench and its derivatives,
-the limited automation and variability reporting in
-academic emulation studies, and the limited availability of
-open-source tooling that operationalizes key RFC~8456
-recommendations in an automated, reusable workflow.
-
-The testbed contributes a seed-controlled automated pipeline,
+benchmarking testbed. It contributes a seed-controlled automated pipeline,
 per-event controller instrumentation that separates p50 from p95
 Packet-In handler processing time, rate-paced end-to-end TCP
 traffic with per-run validation of delivered flows and achieved
 flow rate, and a plug-and-play topology and controller adapter
-system. An
-800-run validation study (400 per controller) using Ryu and
-OS-Ken across star and two-tier tree topologies confirms that the
+system. A validation study of 1{,}200 runs with Ryu, OS-Ken, and
+ONOS across star and two-tier tree topologies confirms that the
 testbed captures load-dependent controller behavior with
 quantified run-to-run variability---including a rise in tail
 latency at scale that median and aggregate RTT-only measurements
-do not reveal---and that the
-adapter contract enables substitution of a closely related
-controller without pipeline modification.
+do not reveal---and that the adapter contract accommodates both a
+closely related Python controller and an architecturally different
+Java controller without controller-specific changes to the shared
+pipeline.
 
 The testbed is publicly available as open-source software;
 planned extensions include per-host containers, link-level
