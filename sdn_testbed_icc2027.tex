@@ -65,30 +65,7 @@ SDN Controller Performance Benchmarking}
 
 % ── Abstract ─────────────────────────────────────────────────
 \begin{abstract}
-Software-Defined Networking (SDN) moves forwarding decisions from
-individual switches to a central software controller, so the
-controller's speed directly affects network performance. Measuring
-that speed reliably is harder than it seems. Existing benchmarking
-tools test controllers with artificial request streams rather than
-real network traffic, while studies that emulate real networks are
-usually run by hand, rarely repeat their experiments, and seldom
-report how much results vary between runs, so their findings are
-difficult to reproduce or compare. We present an open source
-testbed that addresses this gap by automating the full benchmarking
-process. It emulates a network of switches and hosts, sends real
-TCP traffic between the hosts, and records how long the controller
-takes to handle each request a switch sends it about a new flow.
-Every experiment is driven by a random seed, so its traffic can be
-regenerated exactly; each configuration is repeated to quantify
-variability; and every run is checked to confirm that it delivered
-its configured traffic, so that results distorted by an overloaded
-emulation machine are detected rather than reported. Because the
-testbed records every individual response time, it shows not only
-how fast a controller typically responds but also how slow its
-slowest responses become, which averages and round trip delay
-measurements hide. New controllers and network layouts can be
-added through small, documented modules without changing the rest
-of the testbed.
+Software-Defined Networking (SDN) moves forwarding decisions from individual switches to a central software controller. An SDN controller's high processing latency directly affects network performance. Measuring the latency reliably continues to be a challenging task. Existing benchmarking tools examine controller's performance using artificial request streams rather than real network traffic, while studies that emulate real networks are usually done manually, rarely run experiments repeatedly, and seldom report to what extent results vary between runs. Therefore, findings in these studies are difficult to reproduce or compare against. To this end, we present an open source testbed that automates the entire benchmarking process. It emulates a network of switches and hosts, generates real TCP traffic and communicates it between hosts, and records the time it takes a controller to handle each request sent by a switch about a new flow. Every experiment is driven by a random seed, so exact traffic can be regenerated; each configuration is repeated to quantify variability, and every run is checked to confirm that it delivers its configured traffic, so that results distorted by an overloaded emulation machine are detected rather than reported. Because the testbed records every individual response time, it shows not only how fast a controller typically responds but also how slow its slowest responses become; a fact hidden by averages and round trip delay measurements. The testbed is designed to be easily extended. New controllers and network topologies can be added via small, documented modules without changing the rest of the testbed.
 \end{abstract}
 
 \begin{IEEEkeywords}
